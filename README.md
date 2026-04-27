@@ -39,7 +39,8 @@ If you have Go installed on your machine, you don't even need to download anythi
       "command": "go",
       "args": ["run", "github.com/hoangnecon/golab/cmd/server@latest"],
       "env": {
-        "COLAB_TOKEN": "replace-with-your-secure-token"
+        "COLAB_TOKEN": "replace-with-your-secure-token",
+        "COLAB_WS_PORT": "9090"
       }
     }
   }
@@ -54,7 +55,8 @@ Head over to the [Releases Tab](https://github.com/hoangnecon/golab/releases) an
     "golab": {
       "command": "/absolute/path/to/downloaded/golab.exe",
       "env": {
-        "COLAB_TOKEN": "replace-with-your-secure-token"
+        "COLAB_TOKEN": "replace-with-your-secure-token",
+        "COLAB_WS_PORT": "9090"
       }
     }
   }

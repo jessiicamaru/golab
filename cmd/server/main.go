@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +17,7 @@ import (
 )
 
 func main() {
+	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 

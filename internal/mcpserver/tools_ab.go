@@ -155,7 +155,7 @@ type MoveCellInput struct {
 }
 
 func (s *Server) moveCell(ctx context.Context, req *mcp.CallToolRequest, input MoveCellInput) (*mcp.CallToolResult, Empty, error) {
-	return s.proxyTool(ctx, "move_cell", map[string]any{"cellId": input.CellID, "newCellIndex": input.NewCellIndex})
+	return s.proxyTool(ctx, "move_cell", map[string]any{"cellId": input.CellID, "cellIndex": input.NewCellIndex})
 }
 
 func (s *Server) runCodeCell(ctx context.Context, req *mcp.CallToolRequest, input CellIDInput) (*mcp.CallToolResult, Empty, error) {

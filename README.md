@@ -28,8 +28,10 @@ Getting started is identical whether you are running **macOS**, **Linux**, or **
 
 **Prerequisite:** Ensure [Go (Golang)](https://go.dev/doc/install) is installed on your machine.
 
-Add the following configuration block to your MCP client configuration (e.g., `mcp_config.json` or your Cursor settings):
+In your MCP client settings (e.g., Cursor, Claude Desktop, or Gemini Code Assist), you have three options to run the GoLab MCP server:
 
+### Option 1: Live Cloud Module (Recommended)
+If you have Go installed on your machine, you don't even need to download anything! You can command the AI to pull and execute the server directly from Github in one step:
 ```json
 {
   "mcpServers": {
@@ -37,9 +39,22 @@ Add the following configuration block to your MCP client configuration (e.g., `m
       "command": "go",
       "args": ["run", "github.com/hoangnecon/golab/cmd/server@latest"],
       "env": {
-        "COLAB_TOKEN": "YOUR-SECURE-TOKEN-HERE",
-        "COLAB_WS_PORT": "9090",
-        "COLAB_BASE_URL": "colab.research.google.com"
+        "COLAB_TOKEN": "replace-with-your-secure-token"
+      }
+    }
+  }
+}
+```
+
+### Option 2: Pre-compiled Binary
+Head over to the [Releases Tab](https://github.com/hoangnecon/golab/releases) and download the binary for your system (Windows, Mac, Linux).
+```json
+{
+  "mcpServers": {
+    "golab": {
+      "command": "/absolute/path/to/downloaded/golab.exe",
+      "env": {
+        "COLAB_TOKEN": "replace-with-your-secure-token"
       }
     }
   }

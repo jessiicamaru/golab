@@ -91,25 +91,59 @@ GoLab drives incredible automation natively, but it must adhere to Google Colab'
 
 ## 🧰 Available Tools Matrix
 
-GoLab exposes 15 powerful tools to grant your AI comprehensive control over remote execution pipelines.
+GoLab exposes **27 tools** to grant your AI comprehensive control over remote execution pipelines.
 
-| Tool | Category | Description |
-|------|--------|-------------|
-| **`check_status`** | Connection | Pings the WebSocket to verify if the frontend proxy is actively attached. |
-| **`open_notebook`** | Setup | Opens a specified Colab or Drive URL, automatically injecting MCP parameters. |
-| **`get_notebook_outline`**| Read | Returns the full skeletal structure of the notebook (cell types, previews). |
-| **`get_cells`** | Read | Fetches the raw string block contents of specific cells. |
-| **`add_code_cell`** | Write | Appends new Python execution cells natively. |
-| **`add_text_cell`** | Write | Appends Markdown notation cells sequentially. |
-| **`update_cell`** | Write | Complete overwrite mechanism for an existing structural cell. |
-| **`delete_cell`** | Write | Purges target cells from the active Virtual Machine. |
-| **`insert_in_cell`** | Editor | Precision injection of raw syntax at specific index lines. |
-| **`edit_cell_lines`** | Editor | Slice-and-replace localized lines directly avoiding cell corruption. |
-| **`find_replace_in_cell`**| Editor | Perform string-to-string substitution natively inside a cell. |
-| **`run_code_cell`** | Execution | Executes the target cell directly on Colab's hardware (e.g., L4 GPU/TPU). |
-| **`get_cell_output`** | Read | Retrieves executed `Stdout`, Tracebacks, and Base64 stream data output. |
-| **`get_error_cells`** | Debug | Sweeps the active notebook isolating kernel compilation or runtime failures. |
-| **`read_file`** / `list_drive` | File I/O | Extracts datasets directly off Google Drive or the local VM `/content/` path. |
+### Connection & Setup
+
+| Tool | Description |
+|------|-------------|
+| **`check_status`** | Pings the WebSocket to verify if the frontend proxy is actively attached. |
+| **`open_notebook`** | Opens a specified Colab or Drive URL, automatically injecting MCP parameters. |
+| **`get_environment`** | Returns system info: Python version, CUDA version, GPU model, RAM, disk usage. |
+
+### Notebook Reading
+
+| Tool | Description |
+|------|-------------|
+| **`get_notebook_outline`** | Returns the full skeletal structure of the notebook (cell types, previews, definitions). |
+| **`get_cells`** | Fetches the raw contents of specific cells by index range. |
+| **`get_cell_with_lines`** | Returns a cell's content with line numbers for precise reference. |
+| **`get_cell_output`** | Retrieves executed stdout, tracebacks, and Base64 image data. |
+| **`get_running_cells`** | Lists cells currently being executed on the runtime. |
+| **`get_error_cells`** | Sweeps the notebook isolating kernel compilation or runtime failures. |
+| **`get_recent_changes`** | Detects added, modified, and deleted cells since the last call. |
+| **`search_cells`** | Searches for a text pattern across all cells with line-level context. |
+
+### Cell Management
+
+| Tool | Description |
+|------|-------------|
+| **`add_code_cell`** | Inserts a new Python code cell at a specified position. |
+| **`add_text_cell`** | Inserts a new Markdown cell at a specified position. |
+| **`update_cell`** | Complete overwrite of an existing cell's content. |
+| **`delete_cell`** | Removes a target cell from the notebook. |
+| **`move_cell`** | Moves a cell to a new index position in the notebook. |
+| **`run_code_cell`** | Executes the target cell directly on Colab's hardware (e.g., L4 GPU/TPU). |
+
+### Precision Editing
+
+| Tool | Description |
+|------|-------------|
+| **`edit_cell_lines`** | Slice-and-replace specific lines within a cell without full overwrite. |
+| **`insert_in_cell`** | Inject code at a specific line number, shifting existing code down. |
+| **`find_replace_in_cell`** | String substitution within a single cell. |
+| **`find_replace_all`** | String substitution across all cells in the notebook. |
+
+### File I/O & Environment
+
+| Tool | Description |
+|------|-------------|
+| **`read_file`** | Read text files from the Colab VM or mounted Google Drive. |
+| **`write_file`** | Write content to files on the Colab VM or mounted Drive. |
+| **`list_drive`** | List files and directories in Google Drive as a JSON tree. |
+| **`create_project_structure`** | Scaffold a project directory on Drive with `data/`, `models/`, `checkpoints/`, `logs/`, `configs/`. |
+| **`list_packages`** | List all installed Python packages with versions. |
+| **`check_package`** | Check if a specific Python package is installed and its version. |
 
 ---
 

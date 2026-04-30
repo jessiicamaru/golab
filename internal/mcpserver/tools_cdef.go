@@ -239,8 +239,28 @@ except ImportError:
 // ── Group F — Output Tracking ────────────────────────
 
 func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, input CellIDInput) (*mcp.CallToolResult, Empty, error) {
+	// Step 1: Lightweight fetch — get all cell IDs without outputs to find target index
+	cells, _, err := s.getAllCells(ctx, false)
+	if err != nil {
+		r, _ := errResult(err.Error())
+		return r, Empty{}, nil
+	}
+
+	targetIdx := -1
+	for i, c := range cells {
+		if c.ID == input.CellID {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx == -1 {
+		r, _ := errResult("cell not found: " + input.CellID)
+		return r, Empty{}, nil
+	}
+
+	// Step 2: Targeted fetch — only the 1 cell we need, with outputs
 	raw, err := s.proxy.CallTool(ctx, "get_cells", map[string]any{
-		"cellIndexStart": 0, "cellIndexEnd": 500, "includeOutputs": true,
+		"cellIndexStart": targetIdx, "cellIndexEnd": targetIdx + 1, "includeOutputs": true,
 	})
 	if err != nil {
 		r, _ := errResult(err.Error())
@@ -263,57 +283,55 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	json.Unmarshal(result, &resp)
 
-	for _, cell := range resp.Cells {
-		if cell.ID != input.CellID {
-			continue
-		}
+	if len(resp.Cells) == 0 {
+		r, _ := errResult("cell not found: " + input.CellID)
+		return r, Empty{}, nil
+	}
 
-		var stdout strings.Builder
-		var errors []map[string]any
-		hasImages := false
+	cell := resp.Cells[0]
+	var stdout strings.Builder
+	var errors []map[string]any
+	hasImages := false
 
-		for _, o := range cell.Outputs {
-			switch o.OutputType {
-			case "stream":
-				stdout.WriteString(strings.Join(o.Text, ""))
-			case "error":
-				errInfo := map[string]any{
-					"type":    o.EName,
-					"message": o.EValue,
+	for _, o := range cell.Outputs {
+		switch o.OutputType {
+		case "stream":
+			stdout.WriteString(strings.Join(o.Text, ""))
+		case "error":
+			errInfo := map[string]any{
+				"type":    o.EName,
+				"message": o.EValue,
+			}
+			if len(o.Traceback) > 0 {
+				errInfo["traceback"] = strings.Join(o.Traceback, "\n")
+			}
+			errors = append(errors, errInfo)
+		case "display_data", "execute_result":
+			if o.Data != nil {
+				if _, ok := o.Data["image/png"]; ok {
+					hasImages = true
 				}
-				if len(o.Traceback) > 0 {
-					errInfo["traceback"] = strings.Join(o.Traceback, "\n")
-				}
-				errors = append(errors, errInfo)
-			case "display_data", "execute_result":
-				if o.Data != nil {
-					if _, ok := o.Data["image/png"]; ok {
-						hasImages = true
-					}
-					if textData, ok := o.Data["text/plain"]; ok {
-						if arr, ok := textData.([]any); ok {
-							for _, v := range arr {
-								stdout.WriteString(fmt.Sprintf("%v", v))
-							}
-						} else {
-							stdout.WriteString(fmt.Sprintf("%v", textData))
+				if textData, ok := o.Data["text/plain"]; ok {
+					if arr, ok := textData.([]any); ok {
+						for _, v := range arr {
+							stdout.WriteString(fmt.Sprintf("%v", v))
 						}
+					} else {
+						stdout.WriteString(fmt.Sprintf("%v", textData))
 					}
 				}
 			}
 		}
-
-		r, _ := jsonResult(map[string]any{
-			"cellId":      cell.ID,
-			"hasOutput":   len(cell.Outputs) > 0,
-			"stdout":      stdout.String(),
-			"errors":      errors,
-			"hasImages":   hasImages,
-			"outputCount": len(cell.Outputs),
-		})
-		return r, Empty{}, nil
 	}
-	r, _ := errResult("cell not found: " + input.CellID)
+
+	r, _ := jsonResult(map[string]any{
+		"cellId":      cell.ID,
+		"hasOutput":   len(cell.Outputs) > 0,
+		"stdout":      stdout.String(),
+		"errors":      errors,
+		"hasImages":   hasImages,
+		"outputCount": len(cell.Outputs),
+	})
 	return r, Empty{}, nil
 }
 

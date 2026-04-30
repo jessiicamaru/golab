@@ -198,8 +198,6 @@ func (s *Server) runCodeCell(ctx context.Context, req *mcp.CallToolRequest, inpu
 		s.proxy.CallTool(callCtx, "run_code_cell", map[string]any{"cellId": input.CellID})
 	}()
 
-	// Give the browser a moment to register execution
-	time.Sleep(500 * time.Millisecond)
 
 	r, _ := jsonResult(map[string]any{
 		"started": true,

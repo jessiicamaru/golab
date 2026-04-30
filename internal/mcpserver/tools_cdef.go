@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -126,39 +126,9 @@ print(json.dumps({"written": path, "size": len(content)}))
 	return r, Empty{}, nil
 }
 
-type ProjectNameInput struct {
-	ProjectName string `json:"projectName" jsonschema:"Project name (created under MyDrive)"`
-}
 
-func (s *Server) createProjectStructure(ctx context.Context, req *mcp.CallToolRequest, input ProjectNameInput) (*mcp.CallToolResult, Empty, error) {
-	nameB64 := base64.StdEncoding.EncodeToString([]byte(input.ProjectName))
-	code := fmt.Sprintf(`import os, json, base64
-name = base64.b64decode('%s').decode()
-base = '/content/drive/MyDrive/' + name
-dirs = ['data', 'models', 'checkpoints', 'logs', 'configs']
-created = []
-for d in dirs:
-    p = os.path.join(base, d)
-    os.makedirs(p, exist_ok=True)
-    created.append(p)
-print(json.dumps({"project": base, "created": created}))
-`, nameB64)
-
-	output, err := s.runHiddenCell(ctx, code)
-	if err != nil {
-		r, _ := errResult(err.Error())
-		return r, Empty{}, nil
-	}
-	r, _ := textResult(output)
-	return r, Empty{}, nil
-}
 
 // ── Group D — Context Management ─────────────────────
-
-var (
-	lastSnapshotMu sync.Mutex
-	lastSnapshot   map[string]string
-)
 
 func (s *Server) getNotebookOutline(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, Empty, error) {
 	cells, _, err := s.getAllCells(ctx, false)
@@ -206,47 +176,7 @@ func (s *Server) getNotebookOutline(ctx context.Context, req *mcp.CallToolReques
 	return r, Empty{}, nil
 }
 
-func (s *Server) getRecentChanges(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, Empty, error) {
-	cells, _, err := s.getAllCells(ctx, false)
-	if err != nil {
-		r, _ := errResult(err.Error())
-		return r, Empty{}, nil
-	}
 
-	current := make(map[string]string)
-	for _, cell := range cells {
-		current[cell.ID] = strings.Join(cell.Source, "")
-	}
-
-	lastSnapshotMu.Lock()
-	prev := lastSnapshot
-	lastSnapshot = current
-	lastSnapshotMu.Unlock()
-
-	if prev == nil {
-		r, _ := jsonResult(map[string]any{"status": "first_snapshot", "cells": len(current)})
-		return r, Empty{}, nil
-	}
-
-	var added, modified, deleted []string
-	for id := range current {
-		if _, ok := prev[id]; !ok {
-			added = append(added, id)
-		} else if current[id] != prev[id] {
-			modified = append(modified, id)
-		}
-	}
-	for id := range prev {
-		if _, ok := current[id]; !ok {
-			deleted = append(deleted, id)
-		}
-	}
-	r, _ := jsonResult(map[string]any{
-		"added": added, "modified": modified, "deleted": deleted,
-		"unchanged": len(current) - len(added) - len(modified),
-	})
-	return r, Empty{}, nil
-}
 
 // ── Group E — Environment ────────────────────────────
 
@@ -279,20 +209,7 @@ print(json.dumps(info))
 	return r, Empty{}, nil
 }
 
-func (s *Server) listPackages(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, Empty, error) {
-	code := `import json, subprocess
-r = subprocess.run(['pip', 'list', '--format=json'], capture_output=True, text=True)
-pkgs = json.loads(r.stdout)
-print(json.dumps({"packages": pkgs, "total": len(pkgs)}))
-`
-	output, err := s.runHiddenCell(ctx, code)
-	if err != nil {
-		r, _ := errResult(err.Error())
-		return r, Empty{}, nil
-	}
-	r, _ := textResult(output)
-	return r, Empty{}, nil
-}
+
 
 type PackageNameInput struct {
 	PackageName string `json:"packageName" jsonschema:"Package name to check"`
@@ -335,10 +252,12 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 		Cells []struct {
 			ID      string `json:"id"`
 			Outputs []struct {
-				OutputType string   `json:"output_type"`
-				Text       []string `json:"text"`
-				EName      string   `json:"ename"`
-				EValue     string   `json:"evalue"`
+				OutputType string            `json:"output_type"`
+				Text       []string          `json:"text"`
+				EName      string            `json:"ename"`
+				EValue     string            `json:"evalue"`
+				Traceback  []string          `json:"traceback"`
+				Data       map[string]any    `json:"data"`
 			} `json:"outputs"`
 		} `json:"cells"`
 	}
@@ -348,20 +267,49 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 		if cell.ID != input.CellID {
 			continue
 		}
-		var sb strings.Builder
+
+		var stdout strings.Builder
+		var errors []map[string]any
+		hasImages := false
+
 		for _, o := range cell.Outputs {
 			switch o.OutputType {
 			case "stream":
-				sb.WriteString(strings.Join(o.Text, ""))
+				stdout.WriteString(strings.Join(o.Text, ""))
 			case "error":
-				sb.WriteString(fmt.Sprintf("ERROR: %s: %s\n", o.EName, o.EValue))
-			default:
-				sb.WriteString(strings.Join(o.Text, ""))
+				errInfo := map[string]any{
+					"type":    o.EName,
+					"message": o.EValue,
+				}
+				if len(o.Traceback) > 0 {
+					errInfo["traceback"] = strings.Join(o.Traceback, "\n")
+				}
+				errors = append(errors, errInfo)
+			case "display_data", "execute_result":
+				if o.Data != nil {
+					if _, ok := o.Data["image/png"]; ok {
+						hasImages = true
+					}
+					if textData, ok := o.Data["text/plain"]; ok {
+						if arr, ok := textData.([]any); ok {
+							for _, v := range arr {
+								stdout.WriteString(fmt.Sprintf("%v", v))
+							}
+						} else {
+							stdout.WriteString(fmt.Sprintf("%v", textData))
+						}
+					}
+				}
 			}
 		}
+
 		r, _ := jsonResult(map[string]any{
-			"cellId": cell.ID, "hasOutput": len(cell.Outputs) > 0,
-			"outputCount": len(cell.Outputs), "content": sb.String(),
+			"cellId":      cell.ID,
+			"hasOutput":   len(cell.Outputs) > 0,
+			"stdout":      stdout.String(),
+			"errors":      errors,
+			"hasImages":   hasImages,
+			"outputCount": len(cell.Outputs),
 		})
 		return r, Empty{}, nil
 	}
@@ -370,9 +318,18 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 }
 
 func (s *Server) getRunningCells(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, Empty, error) {
-	return s.proxyTool(ctx, "get_cells", map[string]any{
-		"cellIndexStart": 0, "cellIndexEnd": 500, "includeOutputs": false,
+	var running []map[string]any
+	s.runningCells.Range(func(key, value any) bool {
+		cellId := key.(string)
+		startTime := value.(time.Time)
+		running = append(running, map[string]any{
+			"cellId":  cellId,
+			"elapsed": time.Since(startTime).Round(time.Second).String(),
+		})
+		return true
 	})
+	r, _ := jsonResult(map[string]any{"running": running, "count": len(running)})
+	return r, Empty{}, nil
 }
 
 func (s *Server) getErrorCells(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, Empty, error) {

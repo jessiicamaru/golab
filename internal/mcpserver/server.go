@@ -7,6 +7,8 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/hoangnecon/golab/internal/bridge"
 	"github.com/hoangnecon/golab/internal/config"
@@ -17,12 +19,13 @@ const Version = "v1.0.0"
 
 // Server wraps the MCP server with Colab browser proxy.
 type Server struct {
-	ws    *bridge.WSServer
-	proxy *bridge.BrowserProxy
-	cfg   *config.Config
-	token string
-	port  int
-	mcp   *mcp.Server
+	ws           *bridge.WSServer
+	proxy        *bridge.BrowserProxy
+	cfg          *config.Config
+	token        string
+	port         int
+	mcp          *mcp.Server
+	runningCells sync.Map // cellId -> startTime
 }
 
 func New(ws *bridge.WSServer, cfg *config.Config, token string, port int) *Server {
@@ -63,29 +66,25 @@ func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "update_cell", Description: "Replace the entire content of a cell by its ID."}, s.updateCell)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "delete_cell", Description: "Delete a cell by its ID."}, s.deleteCell)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "move_cell", Description: "Move a cell to a new index position."}, s.moveCell)
-	mcp.AddTool(s.mcp, &mcp.Tool{Name: "run_code_cell", Description: "Execute a code cell and return its outputs. Requires a connected runtime."}, s.runCodeCell)
+	mcp.AddTool(s.mcp, &mcp.Tool{Name: "run_code_cell", Description: "Start executing a code cell. Returns immediately with {started: true}. Use get_cell_output or get_running_cells to check progress."}, s.runCodeCell)
 
 	// Group B — IDE Cell Editing
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "edit_cell_lines", Description: "Edit specific lines within a cell. Replaces lines from startLine to endLine with newContent. Lines are 1-indexed."}, s.editCellLines)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "find_replace_in_cell", Description: "Find and replace text within a single cell."}, s.findReplaceInCell)
-	mcp.AddTool(s.mcp, &mcp.Tool{Name: "find_replace_all", Description: "Find and replace text across all cells in the notebook."}, s.findReplaceAll)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "insert_in_cell", Description: "Insert new code at a specific line number within a cell. Existing code shifts down. Line 0 = top."}, s.insertInCell)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "search_cells", Description: "Search for a pattern across all cells. Returns matches with cell ID, line number, and context."}, s.searchCells)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "get_cell_with_lines", Description: "Get a cell's content with line numbers for easy reference."}, s.getCellWithLines)
 
-	// Group C — Project Assessment
+	// Group C — File I/O
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "list_drive", Description: "List files and directories in Google Drive. Returns a JSON tree."}, s.listDrive)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "read_file", Description: "Read a text file from the Colab VM or mounted Drive. Returns content with line numbers."}, s.readFile)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "write_file", Description: "Write content to a file on the Colab VM or mounted Drive."}, s.writeFile)
-	mcp.AddTool(s.mcp, &mcp.Tool{Name: "create_project_structure", Description: "Create a project directory structure on Drive with folders: data/, models/, checkpoints/, logs/, configs/."}, s.createProjectStructure)
 
-	// Group D — Context Management
+	// Group D — Context
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "get_notebook_outline", Description: "Get a compact outline of the notebook: cell index, type, first line summary, function/class definitions, line count."}, s.getNotebookOutline)
-	mcp.AddTool(s.mcp, &mcp.Tool{Name: "get_recent_changes", Description: "Detect changes since the last call. Returns added, modified, and deleted cells."}, s.getRecentChanges)
 
 	// Group E — Environment
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "get_environment", Description: "Get system info: Python version, CUDA version, GPU model, RAM, disk usage."}, s.getEnvironment)
-	mcp.AddTool(s.mcp, &mcp.Tool{Name: "list_packages", Description: "List installed Python packages with versions."}, s.listPackages)
 	mcp.AddTool(s.mcp, &mcp.Tool{Name: "check_package", Description: "Check if a specific Python package is installed and its version."}, s.checkPackage)
 
 	// Group F — Output Tracking
@@ -142,7 +141,7 @@ func extractProxyText(raw json.RawMessage) json.RawMessage {
 
 func (s *Server) runHiddenCell(ctx context.Context, code string) (string, error) {
 	cellsRaw, err := s.proxy.CallTool(ctx, "get_cells", map[string]any{
-		"cellIndexStart": 0, "cellIndexEnd": 200, "includeOutputs": false,
+		"cellIndexStart": 0, "cellIndexEnd": 500, "includeOutputs": false,
 	})
 	if err != nil {
 		return "", fmt.Errorf("get_cells: %w", err)
@@ -171,9 +170,15 @@ func (s *Server) runHiddenCell(ctx context.Context, code string) (string, error)
 		return "", fmt.Errorf("failed to create hidden cell: %s", string(addResult))
 	}
 
-	runRaw, err := s.proxy.CallTool(ctx, "run_code_cell", map[string]any{"cellId": addResp.NewCellID})
-	s.proxy.CallTool(ctx, "delete_cell", map[string]any{"cellId": addResp.NewCellID}) // cleanup
+	// Guarantee cleanup even if ctx is cancelled or run times out.
+	// Use background context so delete is not blocked by parent cancellation.
+	defer func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s.proxy.CallTool(cleanCtx, "delete_cell", map[string]any{"cellId": addResp.NewCellID})
+	}()
 
+	runRaw, err := s.proxy.CallTool(ctx, "run_code_cell", map[string]any{"cellId": addResp.NewCellID})
 	if err != nil {
 		return "", fmt.Errorf("run_code_cell: %w", err)
 	}

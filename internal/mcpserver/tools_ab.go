@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -51,11 +52,17 @@ func (s *Server) checkStatus(ctx context.Context, req *mcp.CallToolRequest, inpu
 // ── Group A — Browser Proxy ──────────────────────────
 
 type OpenNotebookInput struct {
-	NotebookURL string `json:"notebook_url" jsonschema:"Colab URL or Drive URL or file ID. Empty for scratchpad."`
+	NotebookURL string `json:"notebook_url" jsonschema:"Colab URL or Drive URL or file ID. Required."`
 	ForceNew    bool   `json:"force_new,omitempty" jsonschema:"If true, disconnects any existing notebook to open this one."`
 }
 
 func (s *Server) openNotebook(ctx context.Context, req *mcp.CallToolRequest, input OpenNotebookInput) (*mcp.CallToolResult, Empty, error) {
+	// Block empty URL — don't allow scratchpad notebooks
+	if strings.TrimSpace(input.NotebookURL) == "" {
+		r, _ := errResult("notebook_url is required. Please provide a Colab URL (e.g. https://colab.research.google.com/drive/FILE_ID), a Google Drive URL, or a Drive file ID.")
+		return r, Empty{}, nil
+	}
+
 	if s.ws.IsConnected() {
 		if !input.ForceNew {
 			st := s.ws.Status()
@@ -68,9 +75,6 @@ func (s *Server) openNotebook(ctx context.Context, req *mcp.CallToolRequest, inp
 			return r, Empty{}, nil
 		}
 
-		// Force new connection: simply disconnect the existing browser
-		// so the new tab takes over. We DO NOT rotate the token, otherwise 
-		// IDE restarts will lose the ephemeral token and break the connection!
 		s.ws.DisconnectAndRotateToken(s.token)
 	}
 
@@ -155,11 +159,54 @@ type MoveCellInput struct {
 }
 
 func (s *Server) moveCell(ctx context.Context, req *mcp.CallToolRequest, input MoveCellInput) (*mcp.CallToolResult, Empty, error) {
+	// Validate before sending: fetch all cells to verify cellId exists and index is in bounds.
+	cells, _, err := s.getAllCells(ctx, false)
+	if err != nil {
+		r, _ := errResult(fmt.Sprintf("failed to read notebook: %v", err))
+		return r, Empty{}, nil
+	}
+
+	found := false
+	for _, c := range cells {
+		if c.ID == input.CellID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		r, _ := errResult(fmt.Sprintf("cell not found: %s", input.CellID))
+		return r, Empty{}, nil
+	}
+
+	if input.NewCellIndex < 0 || input.NewCellIndex >= len(cells) {
+		r, _ := errResult(fmt.Sprintf("invalid index %d: notebook has %d cells (valid: 0-%d)", input.NewCellIndex, len(cells), len(cells)-1))
+		return r, Empty{}, nil
+	}
+
 	return s.proxyTool(ctx, "move_cell", map[string]any{"cellId": input.CellID, "cellIndex": input.NewCellIndex})
 }
 
 func (s *Server) runCodeCell(ctx context.Context, req *mcp.CallToolRequest, input CellIDInput) (*mcp.CallToolResult, Empty, error) {
-	return s.proxyTool(ctx, "run_code_cell", map[string]any{"cellId": input.CellID})
+	// Fire-and-forget: send run command but don't wait for cell execution to finish.
+	// Track in runningCells so get_running_cells can report accurately.
+	s.runningCells.Store(input.CellID, time.Now())
+
+	go func() {
+		callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		defer s.runningCells.Delete(input.CellID)
+		s.proxy.CallTool(callCtx, "run_code_cell", map[string]any{"cellId": input.CellID})
+	}()
+
+	// Give the browser a moment to register execution
+	time.Sleep(500 * time.Millisecond)
+
+	r, _ := jsonResult(map[string]any{
+		"started": true,
+		"cellId":  input.CellID,
+		"message": "Cell execution started. Use get_cell_output or get_running_cells to check progress.",
+	})
+	return r, Empty{}, nil
 }
 
 // ── Group B — IDE Cell Editing ───────────────────────
@@ -237,30 +284,7 @@ func (s *Server) findReplaceInCell(ctx context.Context, req *mcp.CallToolRequest
 	return r, Empty{}, nil
 }
 
-type FindReplaceAllInput struct {
-	Find    string `json:"find" jsonschema:"Text to find"`
-	Replace string `json:"replace" jsonschema:"Replacement text"`
-}
 
-func (s *Server) findReplaceAll(ctx context.Context, req *mcp.CallToolRequest, input FindReplaceAllInput) (*mcp.CallToolResult, Empty, error) {
-	cells, _, err := s.getAllCells(ctx, false)
-	if err != nil {
-		r, _ := errResult(err.Error())
-		return r, Empty{}, nil
-	}
-	var results []map[string]any
-	for _, cell := range cells {
-		source := strings.Join(cell.Source, "")
-		count := strings.Count(source, input.Find)
-		if count == 0 {
-			continue
-		}
-		s.proxy.CallTool(ctx, "update_cell", map[string]any{"cellId": cell.ID, "content": strings.ReplaceAll(source, input.Find, input.Replace)})
-		results = append(results, map[string]any{"cellId": cell.ID, "replacements": count})
-	}
-	r, _ := jsonResult(map[string]any{"affectedCells": results, "totalCells": len(results)})
-	return r, Empty{}, nil
-}
 
 type InsertInCellInput struct {
 	CellID     string `json:"cellId" jsonschema:"Cell ID"`

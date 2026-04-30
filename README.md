@@ -91,7 +91,7 @@ GoLab drives incredible automation natively, but it must adhere to Google Colab'
 
 ## 🧰 Available Tools Matrix
 
-GoLab exposes **27 tools** to grant your AI comprehensive control over remote execution pipelines.
+GoLab exposes **23 tools** to grant your AI comprehensive control over remote execution pipelines.
 
 ### Connection & Setup
 
@@ -108,10 +108,9 @@ GoLab exposes **27 tools** to grant your AI comprehensive control over remote ex
 | **`get_notebook_outline`** | Returns the full skeletal structure of the notebook (cell types, previews, definitions). |
 | **`get_cells`** | Fetches the raw contents of specific cells by index range. |
 | **`get_cell_with_lines`** | Returns a cell's content with line numbers for precise reference. |
-| **`get_cell_output`** | Retrieves executed stdout, tracebacks, and Base64 image data. |
-| **`get_running_cells`** | Lists cells currently being executed on the runtime. |
+| **`get_cell_output`** | Retrieves executed stdout, tracebacks, and image detection. |
+| **`get_running_cells`** | Lists cells currently being executed, with elapsed time. |
 | **`get_error_cells`** | Sweeps the notebook isolating kernel compilation or runtime failures. |
-| **`get_recent_changes`** | Detects added, modified, and deleted cells since the last call. |
 | **`search_cells`** | Searches for a text pattern across all cells with line-level context. |
 
 ### Cell Management
@@ -123,7 +122,7 @@ GoLab exposes **27 tools** to grant your AI comprehensive control over remote ex
 | **`update_cell`** | Complete overwrite of an existing cell's content. |
 | **`delete_cell`** | Removes a target cell from the notebook. |
 | **`move_cell`** | Moves a cell to a new index position in the notebook. |
-| **`run_code_cell`** | Executes the target cell directly on Colab's hardware (e.g., L4 GPU/TPU). |
+| **`run_code_cell`** | Starts cell execution and returns immediately. Use `get_cell_output` to poll results. |
 
 ### Precision Editing
 
@@ -132,7 +131,6 @@ GoLab exposes **27 tools** to grant your AI comprehensive control over remote ex
 | **`edit_cell_lines`** | Slice-and-replace specific lines within a cell without full overwrite. |
 | **`insert_in_cell`** | Inject code at a specific line number, shifting existing code down. |
 | **`find_replace_in_cell`** | String substitution within a single cell. |
-| **`find_replace_all`** | String substitution across all cells in the notebook. |
 
 ### File I/O & Environment
 
@@ -141,8 +139,6 @@ GoLab exposes **27 tools** to grant your AI comprehensive control over remote ex
 | **`read_file`** | Read text files from the Colab VM or mounted Google Drive. |
 | **`write_file`** | Write content to files on the Colab VM or mounted Drive. |
 | **`list_drive`** | List files and directories in Google Drive as a JSON tree. |
-| **`create_project_structure`** | Scaffold a project directory on Drive with `data/`, `models/`, `checkpoints/`, `logs/`, `configs/`. |
-| **`list_packages`** | List all installed Python packages with versions. |
 | **`check_package`** | Check if a specific Python package is installed and its version. |
 
 ---

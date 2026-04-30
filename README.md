@@ -40,7 +40,8 @@ If you have Go installed on your machine, you don't even need to download anythi
       "args": ["run", "github.com/hoangnecon/golab/cmd/server@latest"],
       "env": {
         "COLAB_TOKEN": "replace-with-your-secure-token",
-        "COLAB_WS_PORT": "9090"
+        "COLAB_WS_PORT": "9090",
+        "GOPROXY": "direct"
       }
     }
   }
@@ -69,6 +70,7 @@ Head over to the [Releases Tab](https://github.com/hoangnecon/golab/releases) an
 |----------------------|-------------|---------|
 | `COLAB_TOKEN` | (Required) A secret passcode of your choosing used to secure the WebSocket connection between your browser and your local agent. | `""` |
 | `COLAB_WS_PORT` | (Optional) The local port used by the browser to communicate with GoLab. | `9090` |
+| `GOPROXY` | (Optional) Set to `direct` when using `go run ... @latest` to bypass Go module cache and instantly receive updates. | `""` |
 | `COLAB_BASE_URL` | (Optional) The Colab domain used when launching new notebook tabs from the IDE. | `colab.research.google.com` |
 
 ---

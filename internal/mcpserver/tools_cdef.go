@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -271,14 +272,13 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 // SaveCellImagesInput defines the parameters for the save_cell_images tool.
 type SaveCellImagesInput struct {
 	CellID     string `json:"cellId" jsonschema:"Cell ID to extract images from"`
-	OutputDir  string `json:"outputDir" jsonschema:"Local directory path to save images (absolute or relative to CWD)"`
+	OutputDir  string `json:"outputDir,omitempty" jsonschema:"Local directory path to save images (absolute or relative to CWD). Defaults to './exports'."`
 	FilePrefix string `json:"filePrefix,omitempty" jsonschema:"Prefix for saved filenames. Default is the cellId."`
 }
 
 func (s *Server) saveCellImages(ctx context.Context, req *mcp.CallToolRequest, input SaveCellImagesInput) (*mcp.CallToolResult, Empty, error) {
 	if input.OutputDir == "" {
-		r, _ := errResult("outputDir is required")
-		return r, Empty{}, nil
+		input.OutputDir = "exports"
 	}
 
 	cell, err := s.fetchCellWithOutputs(ctx, input.CellID)
@@ -333,15 +333,25 @@ func (s *Server) saveCellImages(ctx context.Context, req *mcp.CallToolRequest, i
 			}
 		}
 
+		// Generate MD5 hash of image content for de-duplication
+		hash := md5.Sum(imgBytes)
+		hashStr := fmt.Sprintf("%x", hash)[:8]
+
 		// Build filename
 		var filename string
 		if len(images) == 1 {
-			filename = prefix + ext
+			filename = fmt.Sprintf("%s_%s%s", prefix, hashStr, ext)
 		} else {
-			filename = fmt.Sprintf("%s_%d%s", prefix, i+1, ext)
+			filename = fmt.Sprintf("%s_%d_%s%s", prefix, i+1, hashStr, ext)
 		}
 
 		fullPath := filepath.Join(input.OutputDir, filename)
+
+		// De-duplication: Skip writing if file with exact same content hash already exists
+		if _, err := os.Stat(fullPath); err == nil {
+			savedFiles = append(savedFiles, fullPath)
+			continue
+		}
 
 		// Write file
 		if err := os.WriteFile(fullPath, imgBytes, 0644); err != nil {

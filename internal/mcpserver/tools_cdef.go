@@ -291,7 +291,7 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 	cell := resp.Cells[0]
 	var stdout strings.Builder
 	var errors []map[string]any
-	hasImages := false
+	var images []map[string]any
 
 	for _, o := range cell.Outputs {
 		switch o.OutputType {
@@ -308,8 +308,28 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 			errors = append(errors, errInfo)
 		case "display_data", "execute_result":
 			if o.Data != nil {
-				if _, ok := o.Data["image/png"]; ok {
-					hasImages = true
+				// Extract base64 image data for supported MIME types
+				for _, mime := range []string{"image/png", "image/jpeg"} {
+					if imgData, ok := o.Data[mime]; ok {
+						// imgData can be a string or []any (array of strings)
+						var b64 string
+						switch v := imgData.(type) {
+						case string:
+							b64 = v
+						case []any:
+							var sb strings.Builder
+							for _, s := range v {
+								sb.WriteString(fmt.Sprintf("%v", s))
+							}
+							b64 = sb.String()
+						}
+						if b64 != "" {
+							images = append(images, map[string]any{
+								"mimeType": mime,
+								"data":     b64,
+							})
+						}
+					}
 				}
 				if textData, ok := o.Data["text/plain"]; ok {
 					if arr, ok := textData.([]any); ok {
@@ -329,7 +349,8 @@ func (s *Server) getCellOutput(ctx context.Context, req *mcp.CallToolRequest, in
 		"hasOutput":   len(cell.Outputs) > 0,
 		"stdout":      stdout.String(),
 		"errors":      errors,
-		"hasImages":   hasImages,
+		"hasImages":   len(images) > 0,
+		"images":      images,
 		"outputCount": len(cell.Outputs),
 	})
 	return r, Empty{}, nil
